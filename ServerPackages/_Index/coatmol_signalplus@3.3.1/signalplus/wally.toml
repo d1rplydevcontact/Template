@@ -1,0 +1,10 @@
+[package]
+name = "coatmol/signalplus"
+version = "3.3.1"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+description = "A port of AlexanderLindholt's Signal+ to wally."
+authors = ["AlexanderLindholt"]
+exclude = ["aftman.toml", "selene.toml"]
+
+[dependencies]

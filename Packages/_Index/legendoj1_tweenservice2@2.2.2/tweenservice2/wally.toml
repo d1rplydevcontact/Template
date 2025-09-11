@@ -1,0 +1,8 @@
+[package]
+name = "legendoj1/tweenservice2"
+description = "Replicated tweening"
+version = "2.2.2"
+license = "MIT"
+authors = ["LegendOJ1 (https://legendoj1.xyz)"]
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
