@@ -1770,7 +1770,7 @@ function Promise.prototype:_resolve(...)
 				}))
 			end
 
-			return self:_reject(...)
+			self:_reject(...)
 		end)
 
 		if promise._status == Promise.Status.Cancelled then
