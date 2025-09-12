@@ -1,7 +1,6 @@
 local Directory = {}
 
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Trove = require(script.Parent.Parent.Parent.Trove)
 local Attributes = require(script.Parent.Attributes)

@@ -1,10 +1,12 @@
-local Packages = game:GetController("Packages")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Packages = ReplicatedStorage.Packages
+local Jecs = require(ReplicatedStorage.Packages.Jecs)
 local Janitor = require(Packages.Janitor)
 
 local Controller = {}
-Controller.__index = Controller
 
 export type self = {
+	world: typeof(Jecs.World.new()),
 	janitor: Janitor.Janitor,
 	--- @brief Updates the controller instance every renderstepped
 	--- @param self The controller instance
@@ -19,6 +21,9 @@ export type self = {
 export type Controller = {
 	--- @returns self The controller instance
 	new: () -> self,
+	init: (self) -> (),
 }
+
+-- Individual controllers
 
 return Controller
