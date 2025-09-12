@@ -1,7 +1,0 @@
-[package]
-name = "joelbrd/logger"
-description = "Console logging utilities"
-version = "1.0.6"
-authors = ["Joel Broad"]
-registry = "https://github.com/UpliftGames/wally-index"
-realm = "shared"

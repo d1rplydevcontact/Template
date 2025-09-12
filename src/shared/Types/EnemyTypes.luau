@@ -5,6 +5,9 @@ export type Metadata = {
 	position: Vector3,
 	health: number,
 	speed: number,
+	animations: {
+		[string]: number,
+	},
 }
 
 return Enemy

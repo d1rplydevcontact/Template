@@ -10,7 +10,6 @@ Promise = "evaera/promise@4.0.0"
 Jecs = "ukendio/jecs@0.9.0-rc.12"
 TweenService2 = "legendoj1/tweenservice2@2.2.2"
 Bridgenet2 = "ffrostflame/bridgenet2@1.0.0"
-Utils = "joelbrd/utils@1.0.26"
 
 [server-dependencies]
 ProfileService = "firebird702/profileservice@1.1.0"

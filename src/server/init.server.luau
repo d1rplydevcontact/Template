@@ -16,6 +16,9 @@ local enemyService = serviceManager:getService("EnemyService") :: ServiceTypes.E
 			position: Vector3,
 			health: number,
 			speed: number,
+			animations: {
+				[string]: string
+			}
 		}
 	```
 ]=]
@@ -24,4 +27,7 @@ enemyService:addEnemy({
 	position = workspace["Winter Map"]:FindFirstChild("Path"):FindFirstChildOfClass("Part").Position,
 	health = 50,
 	speed = 100,
+	animations = {
+		move = "70759795260958",
+	},
 })
