@@ -1,7 +1,8 @@
---!strict
+--!nocheck
 --!native
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local CombatManager = require(ServerScriptService.Server.Core.CombatManager)
 local Jecs = require(ReplicatedStorage.Packages.Jecs)
 local Janitor = require(ReplicatedStorage.Packages.Janitor)
 local SignalPlus = require(ServerScriptService.ServerPackages.SignalPlus)
@@ -13,15 +14,19 @@ local enemiesFolder = ReplicatedStorage.Assets.Enemies
 local EnemyService = {}
 EnemyService.__index = EnemyService
 
-type Traits = {
+local HEALTH_THRESHOLD = 0
+
+type Components = {
 	Health: Jecs.Entity<number>,
-	Speed: Jecs.Entity<number>,
 	Radius: Jecs.Entity<number>,
-	Damage: Jecs.Entity<number>,
+	Speed: Jecs.Entity<number>,
+	TargetMode: Jecs.Entity<string>,
 	Cooldown: Jecs.Entity<number>,
 	RangeDamage: Jecs.Entity<number>,
 	Character: Jecs.Entity<Model>,
 }
+
+type CachedTargets = { [number]: Model }
 
 type self = {
 	world: typeof(Jecs.World.new()),
@@ -29,14 +34,13 @@ type self = {
 	enemyAdded: SignalPlus.Signal<Model, Jecs.Entity>,
 	enemyRemoved: SignalPlus.Signal<Model, Jecs.Entity>,
 	serviceManager: any,
-	traits: Traits,
+	components: Components,
 	allyService: any,
-	targets: { [number]: Model },
+	cachedTargets: CachedTargets,
+	enemiesQuery: Jecs.Query<number, Model>?,
 } & typeof(EnemyService)
 
---- @brief Creates a new EnemyService instance
---- @param serviceManager any The ServiceManager instance
---- @return self The EnemyService instance
+--- Creates a new EnemyService instance
 function EnemyService.new(serviceManager): self
 	local self = setmetatable({}, EnemyService)
 	self.world = Jecs.World.new()
@@ -45,170 +49,192 @@ function EnemyService.new(serviceManager): self
 	self.enemyRemoved = SignalPlus()
 	self.serviceManager = serviceManager
 
-	self.traits = {
+	self.components = {
 		Health = self.world:component(),
-		Speed = self.world:component(),
 		Radius = self.world:component(),
-		Damage = self.world:component(),
+		Speed = self.world:component(),
+		TargetMode = self.world:component(),
 		Cooldown = self.world:component(),
 		RangeDamage = self.world:component(),
 		Character = self.world:component(),
 	}
 
-	self.targets = {}
+	self.cachedTargets = {}
+	self.enemiesQuery = nil
+
 	return self
 end
 
---- @brief Initializes the EnemyService, connects signals, and caches allies
 function EnemyService.init(self: self)
 	self.allyService = self.serviceManager:getService("AllyService")
-	self.targets = self.allyService:getAllies()
+	self:_updateTargetCache()
+	self:_setupSignalConnections()
+	self:_createQueries()
+end
 
+function EnemyService._createQueries(self: self)
+	self.enemiesQuery = self.world:query(self.components.Character):cached()
+end
+
+function EnemyService._setupSignalConnections(self: self)
 	self.enemyAdded:Connect(function(character, enemy)
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not humanoid then
-			warn("No humanoid found for", enemy)
-			return
-		end
-
-		humanoid.MaxHealth = self.world:get(enemy, self.traits.Health)
-		humanoid.Health = humanoid.MaxHealth
-		humanoid.WalkSpeed = self.world:get(enemy, self.traits.Speed)
-
-		humanoid.Died:Once(function()
-			Utils.smoothDeath(character)
-				:andThen(function()
-					self:_removeEnemy(character, enemy)
-				end)
-				:catch(warn)
-		end)
-
-		character.Parent = workspace.Temp
-		print(character.Name, "was added")
+		self:_onEnemyAdded(character, enemy)
 	end)
 
 	self.enemyRemoved:Connect(function(character, enemy)
-		self.world:delete(enemy)
-		self.janitor:Remove(character)
+		self:_onEnemyRemoved(character, enemy)
 	end)
 
-	self.allyService.allyAdded:Connect(function()
-		self.targets = self.allyService:getAllies()
-	end)
-	self.allyService.allyRemoved:Connect(function()
-		self.targets = self.allyService:getAllies()
-	end)
-end
+	if self.allyService then
+		self.allyService.allyAdded:Connect(function()
+			self:_updateTargetCache()
+		end)
 
---- @brief Removes an enemy safely
---- @param character Model The enemy character
---- @param enemy Jecs.Entity The corresponding ECS entity
-function EnemyService._removeEnemy(self: self, character: Model, enemy: Jecs.Entity)
-	if character and self.world:contains(enemy) then
-		self.enemyRemoved:Fire(character, enemy)
-	else
-		warn("Enemy not found")
+		self.allyService.allyRemoved:Connect(function()
+			self:_updateTargetCache()
+		end)
 	end
 end
 
---- @brief Adds a new enemy to the ECS world
---- @param metadata CharacterTypes.Metadata The enemy metadata
---- @return Jecs.Entity The created ECS entity
---- @return Model The cloned character
-function EnemyService.addEnemy(self: self, metadata: CharacterTypes.Metadata)
+function EnemyService._onEnemyAdded(self: self, character: Model, enemy: Jecs.Entity)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		warn(`No humanoid found for enemy {enemy}`)
+		return
+	end
+
+	local health = self.world:get(enemy, self.components.Health)
+	humanoid.MaxHealth = health
+	humanoid.Health = health
+	local speed = self.world:get(enemy, self.components.Speed)
+	humanoid.WalkSpeed = speed
+
+	humanoid.Died:Once(function()
+		Utils.fadeoutCharacter(character)
+		self:removeEnemy(character, enemy)
+	end)
+
+	character.Parent = workspace.Temp
+	print(`{character.Name} enemy was added`)
+end
+
+function EnemyService._onEnemyRemoved(self: self, character: Model, enemy: Jecs.Entity)
+	if self.world:contains(enemy) then
+		self.world:delete(enemy)
+	end
+	self.janitor:Remove(character)
+	print(`{character.Name} enemy was removed`)
+end
+
+function EnemyService._updateTargetCache(self: self)
+	self.cachedTargets = {}
+	if self.allyService then
+		local allies = self.allyService:getAllies()
+		if allies then
+			for _, character in allies do
+				table.insert(self.cachedTargets, character)
+			end
+		end
+	end
+end
+
+function EnemyService._isValidEnemy(character: Model): boolean
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return humanoid ~= nil and humanoid.Health > HEALTH_THRESHOLD
+end
+
+--- @brief Adds a new enemy
+function EnemyService.addEnemy(self: self, metadata: CharacterTypes.EnemyMetadata): (Jecs.Entity, Model)
 	local enemy = self.world:entity()
 	local character = enemiesFolder[metadata.name]:Clone()
+
+	if not character then
+		error(`Enemy template '{metadata.name}' not found in enemies folder`)
+	end
+
 	character:PivotTo(metadata.cframe)
 
-	self.world:set(enemy, self.traits.Character, character)
-	self.world:set(enemy, self.traits.Health, metadata.health)
-	self.world:set(enemy, self.traits.Speed, metadata.speed)
-	self.world:set(enemy, self.traits.Damage, metadata.damage)
-	self.world:set(enemy, self.traits.Cooldown, metadata.cooldown)
+	self.world:set(enemy, self.components.Character, character)
+	self.world:set(enemy, self.components.Health, metadata.health)
+	self.world:set(enemy, self.components.Speed, metadata.speed)
+	self.world:set(enemy, self.components.TargetMode, metadata.targetMode)
+	self.world:set(enemy, self.components.Cooldown, metadata.cooldown or 0)
+
 	if metadata.radius then
-		self.world:set(enemy, self.traits.Radius, metadata.radius)
+		self.world:set(enemy, self.components.Radius, metadata.radius)
 	end
 	if metadata.rangeDamage then
-		self.world:set(enemy, self.traits.RangeDamage, metadata.rangeDamage)
+		self.world:set(enemy, self.components.RangeDamage, metadata.rangeDamage)
 	end
 
 	self.janitor:Add(character, "Destroy", character)
 	self.enemyAdded:Fire(character, enemy)
+
+	return enemy, character
 end
 
---- @brief Returns all enemy entities in the ECS world
---- @return { [number]: Jecs.Entity } The cached enemy entities
-function EnemyService.getEnemies(self: self): Jecs.Query<number, Model>?
-	local enemies = self.world:query(self.traits.Character)
-	if enemies then
-		return self.world:query(self.traits.Character):cached()
+function EnemyService.removeEnemy(self: self, character: Model, enemy: Jecs.Entity)
+	if character and self.world:contains(enemy) then
+		self.enemyRemoved:Fire(character, enemy)
+	else
+		warn("Attempted to remove non-existent enemy")
 	end
-	return nil
 end
 
---- @brief Updates all enemies each frame
---- @param dt number Delta time from the frame
+function EnemyService.getEnemies(self: self): Jecs.Query<number, Model>?
+	return self.enemiesQuery
+end
+
 function EnemyService.update(self: self, dt: number)
-	-- TEST
-	-- ADD TARGET MODES (Nearest, middle, last, random, strongest)
-	-- Make it better, lol, it sucks, get good
-	for enemy, character, radius, cooldown in
-		self.world:query(self.traits.Character, self.traits.Radius, self.traits.Cooldown)
+	for enemy, character, radius, targetMode, cooldown in
+		self.world:query(
+			self.components.Character,
+			self.components.Radius,
+			self.components.TargetMode,
+			self.components.Cooldown
+		)
 	do
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then
+		if not self._isValidEnemy(character) then
 			continue
 		end
 
 		if cooldown > 0 then
 			cooldown -= dt
-			self.world:set(enemy, self.traits.Cooldown, cooldown)
+			self.world:set(enemy, self.components.Cooldown, math.max(0, cooldown))
 		end
 
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if not root then
-			continue
-		end
-
-		local nearestTarget, nearestDist
-		for _, target in self.targets do
-			local targetRoot = target:FindFirstChild("HumanoidRootPart")
-			if not targetRoot then
-				continue
-			end
-			local dist = (targetRoot.Position - root.Position).Magnitude
-			if dist <= radius and (not nearestDist or dist < nearestDist) then
-				nearestTarget = target
-				nearestDist = dist
-			end
-		end
-
-		if nearestTarget then
-			local targetRoot = nearestTarget:FindFirstChild("HumanoidRootPart")
-			if targetRoot then
-				root.CFrame = CFrame.lookAt(root.Position, targetRoot.Position)
-			end
-
-			if cooldown <= 0 then
-				local damage = self.world:get(enemy, self.traits.RangeDamage)
-				local targetHumanoid = nearestTarget:FindFirstChildOfClass("Humanoid")
-				if targetHumanoid and targetHumanoid.Health > 0 then
-					targetHumanoid:TakeDamage(damage)
-				end
-				self.world:set(enemy, self.traits.Cooldown, 1)
-			end
+		if CombatManager then
+			CombatManager.processCharacterCombat(
+				self.world,
+				enemy,
+				character,
+				radius,
+				targetMode,
+				cooldown,
+				dt,
+				self.cachedTargets,
+				self.components.RangeDamage,
+				self.components.Cooldown
+			)
 		end
 	end
 end
 
---- @brief Clears all enemies and cleans up resources
+--- Clears all enemies and cleans up resources
 function EnemyService.clear(self: self)
-	for enemy, character in self.world:query(self.traits.Character) do
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		character:Destroy()
+	if self.enemiesQuery then
+		for _, character in self.enemiesQuery do
+			if character and character.Parent then
+				character:Destroy()
+			end
+		end
 	end
+
 	self.world:cleanup()
 	self.janitor:Cleanup()
+
+	self.cachedTargets = {}
+	self.enemiesQuery = nil
 end
 
 return EnemyService

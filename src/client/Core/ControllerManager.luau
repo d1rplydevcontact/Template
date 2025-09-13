@@ -1,9 +1,8 @@
---!strict
 --!native
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Packages = ReplicatedStorage.Packages
-local Promise = require(Packages.Promise)
+local StarterPlayer = game:GetService("StarterPlayer")
+local Jecs = require(ReplicatedStorage.Packages.Jecs)
 local ControllerTypes = require(ReplicatedStorage.Shared.Types.ControllerTypes)
 
 local ControllerManager = {}
@@ -11,89 +10,94 @@ ControllerManager.__index = ControllerManager
 
 type self = {
 	controllers: { [string]: ControllerTypes.Controller },
-}
+	world: typeof(Jecs.World.new()),
+} & typeof(ControllerManager)
 
-export type ControllerManager = typeof(setmetatable({} :: self, ControllerManager))
+export type ControllerManager = typeof(setmetatable({}, ControllerManager))
 
 local BLACKLISTED_CONTROLLERS = {}
+local controllersFolder = StarterPlayer.StarterPlayerScripts.Client.Controllers
 
-local controllersFolder = script.Parent.Parent.Controllers
-
---- @brief Create a singleton ControllerManager instance
---- @return ControllerManager
 function ControllerManager.new(): ControllerManager
 	local self = setmetatable({}, ControllerManager)
+	self.world = Jecs.World.new()
 	self.controllers = {}
 	return self
 end
 
---- @brief Call the update method of a controller every PreRender
---- @param controllerInstance ControllerTypes.Controller
---- @param controllerName string
-local function updateControllerAsync(controllerInstance, controllerName: string)
-	return Promise.try(function()
-		local cb = controllerInstance.update
-		if cb then
-			RunService.PreRender:Connect(function(dt)
-				cb(controllerInstance, dt)
-			end)
-		else
-			warn(controllerName .. " does not have an 'update' method")
-		end
-	end):catch(function(err)
-		error("Failed to setup update for controller " .. controllerName .. ": " .. tostring(err))
-	end)
-end
-
---- @brief Initialize all controllers in the ControllerManager
---- @param self ControllerManager
-function ControllerManager:init()
-	for _, controllerModule in ipairs(controllersFolder:GetChildren()) do
-		if controllerModule:IsA("ModuleScript") then
-			if table.find(BLACKLISTED_CONTROLLERS, controllerModule.Name) then
-				return warn(controllerModule.Name, "is blacklisted")
+--- Initialize all controllers
+function ControllerManager.init(self: self)
+	for _, moduleScript in ipairs(controllersFolder:GetChildren()) do
+		if moduleScript:IsA("ModuleScript") then
+			if table.find(BLACKLISTED_CONTROLLERS, moduleScript.Name) then
+				warn(moduleScript.Name, "is blacklisted")
+				continue
 			end
 			local success, result = pcall(function()
-				local controller = require(controllerModule) :: ControllerTypes.Controller
-				local controllerInstance = controller.new()
-				controllerInstance:init()
-
-				self.controllers[controllerModule.Name] = controllerInstance
-
-				updateControllerAsync(controllerInstance, controllerModule.Name)
-
+				local controllerModule = require(moduleScript) :: ControllerTypes.Controller
+				local controllerInstance = controllerModule.new(self)
 				return controllerInstance
 			end)
-
-			if not success then
-				error("Failed to initialize controller " .. controllerModule.Name .. ": " .. tostring(result))
+			if success then
+				self.controllers[moduleScript.Name] = result
+			else
+				warn(`Failed to load controller {moduleScript.Name}:`, result)
 			end
 		end
 	end
-	print("Initialized the ControllerManager controllers")
+
+	for name, controller in pairs(self.controllers) do
+		if controller.init then
+			local success, err = pcall(controller.init, controller)
+			if not success then
+				warn(`Failed to initialize controller {name}:`, err)
+			end
+		end
+	end
+
+	RunService.PostSimulation:Connect(function(dt)
+		for name, controller in pairs(self.controllers) do
+			if controller.update then
+				local success, err = pcall(controller.update, controller, dt)
+				if not success then
+					warn("Failed to update controller", name, err)
+				end
+			end
+		end
+	end)
 end
 
---- @brief Get a controller instance by name
---- @param self ControllerManager
---- @param name string
-function ControllerManager:getController(name: string): ControllerTypes.Controller?
+function ControllerManager.getController(self: self, name: string): ControllerTypes.Controller?
 	local controller = self.controllers[name]
 	if not controller then
-		warn("Controller not found: " .. name)
+		warn(`Controller not found: {name}. Available controllers:`, table.concat(self:getControllerNames(), ", "))
 		return nil
 	end
 	return controller
 end
 
---- @brief Clear all controllers
---- @param self ControllerManager
-function ControllerManager:clearAllControllers()
-	for _, controller in pairs(self.controllers) do
+function ControllerManager.getControllerNames(self: self): { string }
+	local names = {}
+	for name in pairs(self.controllers) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	return names
+end
+
+function ControllerManager.hasController(self: self, name: string): boolean
+	return self.controllers[name] ~= nil
+end
+
+function ControllerManager.clearAllControllers(self: self)
+	for name, controller in pairs(self.controllers) do
 		if controller.clear then
-			controller.clear()
+			local success, err = pcall(controller.clear, controller)
+			if not success then
+				warn(`Failed to clear controller {name}:`, err)
+			end
 		end
 	end
-	print("Cleared all the controllers")
 end
 
 return ControllerManager
