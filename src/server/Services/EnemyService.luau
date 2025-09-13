@@ -84,6 +84,7 @@ function EnemyService.init(self: self)
 		end)
 
 		character.Parent = workspace.Temp
+		print(character.Name, "was added")
 	end)
 
 	self.enemyRemoved:Connect(function(character, enemy)
