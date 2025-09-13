@@ -1,24 +1,21 @@
 local Character = {}
 
-export type AllyMetadata = {
+type CharacterMetadata = {
 	name: string,
-	position: CFrame,
 	health: number,
 	radius: number?,
-	targetMode: string,
+	targetMode: "Nearest" | "Farthest" | "Middle" | "Random" | "Weakest" | "Strongest",
 	cooldown: number,
 	rangeDamage: number?,
 }
 
-export type EnemyMetadata = {
-	name: string,
+export type AllyMetadata = CharacterMetadata & {
+	position: CFrame,
+}
+
+export type EnemyMetadata = CharacterMetadata & {
 	startPosition: CFrame,
-	health: number,
 	speed: number,
-	radius: number?,
-	targetMode: string,
-	cooldown: number,
-	rangeDamage: number?,
 	damage: number,
 }
 

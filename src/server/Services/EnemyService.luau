@@ -9,7 +9,8 @@ local SignalPlus = require(ServerScriptService.ServerPackages.SignalPlus)
 local CharacterTypes = require(ReplicatedStorage.Shared.Types.CharacterTypes)
 local Utils = require(ReplicatedStorage.Shared.Utils)
 
-local enemiesFolder = ReplicatedStorage.Assets.Enemies
+local enemiesInstancesFolder = ReplicatedStorage.Assets.Enemies
+local enemiesConfigFolder = ReplicatedStorage.Shared.Enemies
 
 local EnemyService = {}
 EnemyService.__index = EnemyService
@@ -110,7 +111,7 @@ function EnemyService._onEnemyAdded(self: self, character: Model, enemy: Jecs.En
 	humanoid.WalkSpeed = speed
 
 	humanoid.Died:Once(function()
-		Utils.fadeoutCharacter(character)
+		Utils.deathEffect(character)
 		self:removeEnemy(character, enemy)
 	end)
 
@@ -144,15 +145,17 @@ function EnemyService._isValidEnemy(character: Model): boolean
 end
 
 --- @brief Adds a new enemy
-function EnemyService.addEnemy(self: self, metadata: CharacterTypes.EnemyMetadata): (Jecs.Entity, Model)
+function EnemyService.addEnemy(self: self, name: string): (Jecs.Entity, Model)
+	local metadata: CharacterTypes.EnemyMetadata = require(enemiesConfigFolder[name])
+
 	local enemy = self.world:entity()
-	local character = enemiesFolder[metadata.name]:Clone()
+	local character = enemiesInstancesFolder[metadata.name]:Clone()
 
 	if not character then
-		error(`Enemy template '{metadata.name}' not found in enemies folder`)
+		error(`Enemy template '{name}' not found in enemies folder`)
 	end
 
-	character:PivotTo(metadata.cframe)
+	character:PivotTo(metadata.startPosition)
 
 	self.world:set(enemy, self.components.Character, character)
 	self.world:set(enemy, self.components.Health, metadata.health)
@@ -169,8 +172,6 @@ function EnemyService.addEnemy(self: self, metadata: CharacterTypes.EnemyMetadat
 
 	self.janitor:Add(character, "Destroy", character)
 	self.enemyAdded:Fire(character, enemy)
-
-	return enemy, character
 end
 
 function EnemyService.removeEnemy(self: self, character: Model, enemy: Jecs.Entity)

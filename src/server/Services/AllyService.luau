@@ -9,7 +9,8 @@ local SignalPlus = require(ServerScriptService.ServerPackages.SignalPlus)
 local CharacterTypes = require(ReplicatedStorage.Shared.Types.CharacterTypes)
 local Utils = require(ReplicatedStorage.Shared.Utils)
 
-local alliesFolder = ReplicatedStorage.Assets.Allies
+local alliesInstancesFolder = ReplicatedStorage.Assets.Allies
+local alliesConfigFolder = ReplicatedStorage.Shared.Allies
 
 local AllyService = {}
 AllyService.__index = AllyService
@@ -106,7 +107,7 @@ function AllyService._onAllyAdded(self: self, character: Model, ally: Jecs.Entit
 	humanoid.Health = health
 
 	humanoid.Died:Once(function()
-		Utils.fadeoutCharacter(character)
+		Utils.deathEffect(character)
 		self:removeAlly(character, ally)
 	end)
 
@@ -139,15 +140,17 @@ function AllyService._isValidAlly(character: Model): boolean
 	return humanoid ~= nil and humanoid.Health > HEALTH_THRESHOLD
 end
 
-function AllyService.addAlly(self: self, metadata: CharacterTypes.AllyMetadata): (Jecs.Entity, Model)
+function AllyService.addAlly(self: self, name: string): (Jecs.Entity, Model)
+	local metadata: CharacterTypes.AllyMetadata = require(alliesConfigFolder[name])
+
 	local ally = self.world:entity()
-	local character = alliesFolder[metadata.name]:Clone()
+	local character = alliesInstancesFolder[metadata.name]:Clone()
 
 	if not character then
 		error(`Ally template '{metadata.name}' not found in allies folder`)
 	end
 
-	character:PivotTo(metadata.cframe)
+	character:PivotTo(metadata.position)
 
 	self.world:set(ally, self.components.Character, character)
 	self.world:set(ally, self.components.Health, metadata.health)
@@ -163,8 +166,6 @@ function AllyService.addAlly(self: self, metadata: CharacterTypes.AllyMetadata):
 
 	self.janitor:Add(character, "Destroy", character)
 	self.allyAdded:Fire(character, ally)
-
-	return ally, character
 end
 
 function AllyService.removeAlly(self: self, character: Model, ally: Jecs.Entity)
@@ -180,6 +181,7 @@ function AllyService.getAllies(self: self): Jecs.Query<number, Model>?
 end
 
 function AllyService.update(self: self, dt: number)
+	-- Query allies with relevant components
 	for ally, character, radius, targetMode, cooldown in
 		self.world:query(
 			self.components.Character,
@@ -188,28 +190,33 @@ function AllyService.update(self: self, dt: number)
 			self.components.Cooldown
 		)
 	do
+		-- Skip dead or invalid allies
 		if not self._isValidAlly(character) then
 			continue
 		end
 
+		-- Update cooldown
 		if cooldown > 0 then
 			cooldown -= dt
 			self.world:set(ally, self.components.Cooldown, math.max(0, cooldown))
 		end
 
+		-- Process ECS-based combat against cached targets
 		if CombatManager then
-			CombatManager.processCharacterCombat(
-				self.world,
-				ally,
-				character,
-				radius,
-				targetMode,
-				cooldown,
-				dt,
-				self.cachedTargets,
-				self.components.RangeDamage,
-				self.components.Cooldown
-			)
+			local position = CombatManager.getHumanoidRootPart(character)
+			if position then
+				CombatManager.processCharacterCombatComponents(
+					self.world,
+					ally,
+					position.Position,
+					self.world:get(ally, self.components.Radius) or 0,
+					self.world:get(ally, self.components.TargetMode) or "Nearest",
+					self.world:get(ally, self.components.Cooldown) or 0,
+					dt,
+					self.cachedTargets,
+					self.components
+				)
+			end
 		end
 	end
 end

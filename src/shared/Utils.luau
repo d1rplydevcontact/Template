@@ -66,17 +66,17 @@ function Utils.loadAnimation(parent: Instance, animationId: string): AnimationTr
 	end
 end
 
---- @brief Fades out a character clone over time
---- @param character Model The character to fade out
---- @param duration number? Optional duration in seconds (default: 1)
---- @param delay number? Optional delay before starting fade (default: 2)
---- @return () -> () Cleanup function to stop the fade early
-function Utils.fadeoutCharacter(character: Model, duration: number?, delay: number?): () -> ()
+--- @brief Ragdolls a character and fades out a ragdolled clone
+--- @param character Model The character to ragdoll and fade
+--- @param duration number? Optional fade duration in seconds (default: 1)
+--- @param delay number? Optional delay before fade starts (default: 2)
+--- @return () -> () Cleanup function to stop fade early
+function Utils.deathEffect(character: Model, duration: number?, delay: number?): () -> ()
 	duration = duration or 1
 	delay = delay or 2
 
 	if not character or not character.Parent then
-		warn("Utils.fadeoutCharacter: Invalid character")
+		warn("Utils.ragdollAndFade: Invalid character")
 		return function() end
 	end
 
@@ -87,14 +87,46 @@ function Utils.fadeoutCharacter(character: Model, duration: number?, delay: numb
 	local tweens = {}
 	local cancelled = false
 
-	-- Helper function to fade all descendants
+	-- Helper: Ragdoll a character (Motor6D → BallSocket / Weld)
+	local function ragdollChar(char: Model)
+		for _, Part in ipairs(char:GetChildren()) do
+			if Part:IsA("BasePart") then
+				local Motor6D = Part:FindFirstChildWhichIsA("Motor6D")
+				if Motor6D then
+					if Part.Name ~= "Head" then
+						local BallSocket = Instance.new("BallSocketConstraint")
+						local Attachment1 = Instance.new("Attachment")
+						local Attachment2 = Instance.new("Attachment")
+						Attachment1.CFrame = Motor6D.C0
+						Attachment2.CFrame = Motor6D.C1
+						Attachment1.Parent = Motor6D.Part0
+						Attachment2.Parent = Motor6D.Part1
+						BallSocket.Attachment0 = Attachment1
+						BallSocket.Attachment1 = Attachment2
+						BallSocket.Parent = Motor6D.Parent
+						Motor6D:Destroy()
+					else
+						local WeldConstraint = Instance.new("WeldConstraint")
+						WeldConstraint.Part0 = Motor6D.Part0
+						WeldConstraint.Part1 = Motor6D.Part1
+						WeldConstraint.Parent = Motor6D.Parent
+					end
+				end
+			end
+		end
+	end
+
+	-- Ragdoll both the original and the clone
+	ragdollChar(character)
+	ragdollChar(clone)
+
+	-- Helper: Fade a single object
 	local function fadeObject(obj)
 		if obj:IsA("BasePart") then
-			local originalTransparency = obj.Transparency
 			local tween = TweenService:Create(
 				obj,
 				TweenInfo.new(duration, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out, 0, false, delay),
-				{ Transparency = math.min(1, originalTransparency + (1 - originalTransparency)) }
+				{ Transparency = 1 }
 			)
 			table.insert(tweens, tween)
 			return tween
@@ -110,11 +142,11 @@ function Utils.fadeoutCharacter(character: Model, duration: number?, delay: numb
 		return nil
 	end
 
-	-- Fade all parts and decals in the clone
+	-- Fade all descendants in the clone
 	for _, obj in ipairs(clone:GetDescendants()) do
 		fadeObject(obj)
 	end
-	fadeObject(clone) -- Also fade the root if it's a part
+	fadeObject(clone)
 
 	-- Start all tweens
 	for _, tween in ipairs(tweens) do
@@ -126,7 +158,6 @@ function Utils.fadeoutCharacter(character: Model, duration: number?, delay: numb
 	-- Cleanup after completion
 	task.spawn(function()
 		if #tweens > 0 then
-			-- Wait for the last tween to complete
 			local longestTween = tweens[1]
 			for _, tween in ipairs(tweens) do
 				if
@@ -136,7 +167,6 @@ function Utils.fadeoutCharacter(character: Model, duration: number?, delay: numb
 					longestTween = tween
 				end
 			end
-
 			if not cancelled then
 				longestTween.Completed:Wait()
 			end
