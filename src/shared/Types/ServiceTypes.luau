@@ -1,7 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 local Packages = ReplicatedStorage.Packages
-local EnemyService = require(ServerScriptService.Server.Services.EnemyService)
 local Jecs = require(Packages.Jecs)
 local Janitor = require(Packages.Janitor)
 
@@ -24,9 +22,6 @@ export type Service = {
 	--- @returns self The service instance
 	new: () -> self,
 	init: (self) -> (),
-}
-
--- Individual services
-export type EnemyService = typeof(setmetatable({}, EnemyService)) & Service
+} & self
 
 return Service

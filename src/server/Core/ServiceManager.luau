@@ -3,98 +3,80 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Packages = ReplicatedStorage.Packages
-local Promise = require(Packages.Promise)
+local Jecs = require(ReplicatedStorage.Packages.Jecs)
 local ServiceTypes = require(ReplicatedStorage.Shared.Types.ServiceTypes)
 
 local ServiceManager = {}
 ServiceManager.__index = ServiceManager
 
+type self = {
+	services: { [string]: ServiceTypes.Service },
+	world: typeof(Jecs.World.new()),
+} & ServiceManager
 export type ServiceManager = typeof(setmetatable({}, ServiceManager))
 
--- Exclude service from executing
-local BLACKLISTED_SERVICES = {
-	"WaveService",
-}
-
+local BLACKLISTED_SERVICES = { "WaveService" }
 local servicesFolder = ServerScriptService.Server.Services
 
---- @brief Create a singleton ServiceManager instance
---- @return ServiceManager
+--- Create a new ServiceManager instance
 function ServiceManager.new(): ServiceManager
 	local self = setmetatable({}, ServiceManager)
+	self.world = Jecs.World.new()
 	self.services = {}
 	return self
 end
 
---- @brief Call the update method of a service every PostSimulation
---- @param serviceInstance ServiceTypes.Service
---- @param serviceName string
-local function updateServiceAsync(serviceInstance, serviceName: string)
-	Promise.try(function()
-		local cb = serviceInstance.update
-		if cb then
-			RunService.PostSimulation:Connect(function(dt)
-				cb(serviceInstance, dt)
-			end)
-		else
-			warn(serviceName .. " does not have an 'update' method")
+--- Initialize all services
+function ServiceManager.init(self: self)
+	for _, moduleScript in ipairs(servicesFolder:GetChildren()) do
+		if moduleScript:IsA("ModuleScript") then
+			if table.find(BLACKLISTED_SERVICES, moduleScript.Name) then
+				warn(moduleScript.Name, "is blacklisted")
+				continue
+			end
+
+			local serviceModule = require(moduleScript) :: ServiceTypes.Service
+			local serviceInstance = serviceModule.new(self)
+			self.services[moduleScript.Name] = serviceInstance
 		end
-	end):catch(function(err)
-		error("Failed to setup update for service " .. serviceName .. ": " .. tostring(err))
+	end
+
+	for name, service in pairs(self.services) do
+		if service.init then
+			service:init()
+		end
+	end
+
+	RunService.PostSimulation:Connect(function(dt)
+		for name, service in pairs(self.services) do
+			if service.update then
+				local success, err = pcall(service.update, service, dt)
+				if not success then
+					warn("Failed to update service", name, err)
+				end
+			end
+		end
 	end)
 end
 
---- @brief Initialize all services in the ServiceManager
---- @param self ServiceManager
-function ServiceManager:init()
-	for _, serviceModule in ipairs(servicesFolder:GetChildren()) do
-		if serviceModule:IsA("ModuleScript") then
-			if table.find(BLACKLISTED_SERVICES, serviceModule.Name) then
-				return warn(serviceModule.Name, "is blacklisted")
-			end
-
-			local success, result = pcall(function()
-				local service = require(serviceModule) :: ServiceTypes.Service
-				local serviceInstance = service.new()
-				serviceInstance:init()
-
-				self.services[serviceModule.Name] = serviceInstance
-
-				updateServiceAsync(serviceInstance, serviceModule.Name)
-
-				return serviceInstance
-			end)
-
-			if not success then
-				error("Failed to initialize service " .. serviceModule.Name .. ": " .. tostring(result))
-			end
-		end
-	end
-	print("Initialized the ServiceManager services")
-end
-
---- @brief Get a service instance by name
---- @param self ServiceManager
---- @param name string
-function ServiceManager:getService(name: string): ServiceTypes.Service?
+--- Retrieve a service by name
+function ServiceManager.getService(self: self, name: string): ServiceTypes.Service?
 	local service = self.services[name]
 	if not service then
-		warn("Service not found: " .. name)
+		warn("Service not found:", name)
 		return nil
 	end
 	return service
 end
 
---- @brief Clear all services
---- @param self ServiceManager
-function ServiceManager:clearAllServices()
+--- Clear all services by calling their `clear` method
+function ServiceManager.clearAllServices(self: self)
 	for _, service in pairs(self.services) do
 		if service.clear then
-			service.clear()
+			service:clear()
 		end
 	end
-	print("Cleared all the services")
+	print("Cleared all services")
 end
 
 return ServiceManager

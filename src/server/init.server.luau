@@ -1,33 +1,30 @@
---!strict
 --!native
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServiceTypes = require(ReplicatedStorage.Shared.Types.ServiceTypes)
 local ServiceManager = require(script.Core.ServiceManager)
 
 local serviceManager = ServiceManager.new()
 serviceManager:init()
 
-local enemyService = serviceManager:getService("EnemyService") :: ServiceTypes.EnemyService
---[=[
-	Test
-	```luau
-		type Metadata = {
-			name: string,
-			position: Vector3,
-			health: number,
-			speed: number,
-			animations: {
-				[string]: string
-			}
-		}
-	```
-]=]
+local enemyService = serviceManager:getService("EnemyService")
+local allyService = serviceManager:getService("AllyService")
+
 enemyService:addEnemy({
-	name = "Enemy",
-	position = workspace["Winter Map"]:FindFirstChild("Path"):FindFirstChildOfClass("Part").Position,
+	name = "Starter Enemy",
+	cframe = CFrame.new(Vector3.new(0, 5, 0)),
 	health = 50,
-	speed = 100,
-	animations = {
-		move = "70759795260958",
-	},
+	speed = 16,
+	damage = 10,
+	cooldown = 1,
+	radius = 10,
+	rangeDamage = 5,
+})
+
+allyService:addAlly({
+	name = "Starter Ally",
+	cframe = CFrame.new(Vector3.new(5, 5, 0)),
+	health = 80,
+	speed = 12,
+	damage = 15,
+	cooldown = 0.5,
+	radius = 12,
+	rangeDamage = 8,
 })

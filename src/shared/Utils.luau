@@ -1,4 +1,7 @@
 --!nocheck
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Promise = require(ReplicatedStorage.Packages.Promise)
 local Utils = {}
 
 --- @brief Loads an animation for a model or instance
@@ -29,8 +32,39 @@ function Utils.loadAnimation(parent: Instance, animationId: string)
 	local animation = Instance.new("Animation")
 	animation.AnimationId = animationId
 	animation.Parent = animator
-	-- Return loaded track (useful if you want to :Play())
 	return animator:LoadAnimation(animation)
+end
+
+function Utils.smoothDeath(character)
+	return Promise.new(function(resolve, _reject)
+		local tweens = {}
+		for _, part in ipairs(character:GetChildren()) do
+			if part:IsA("BasePart") then
+				local tween = TweenService:Create(
+					part,
+					TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out, 0, false, 1),
+					{ Transparency = 1 }
+				)
+				table.insert(tweens, tween)
+				tween:Play()
+			end
+		end
+
+		if #tweens == 0 then
+			resolve()
+			return
+		end
+
+		local finished = 0
+		for _, tween in ipairs(tweens) do
+			tween.Completed:Once(function()
+				finished += 1
+				if finished == #tweens then
+					resolve()
+				end
+			end)
+		end
+	end)
 end
 
 return Utils
